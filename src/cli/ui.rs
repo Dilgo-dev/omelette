@@ -6,16 +6,22 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::{App, Cell, CellStatus, GotoFocus, Mode};
 
-const OMNI_RED: Color = Color::Rgb(178, 34, 34);
-const OMNI_BG: Color = Color::Rgb(20, 20, 20);
-const OMNI_INK: Color = Color::Rgb(245, 240, 232);
+// Catppuccin Mocha palette
+const CTP_BASE: Color = Color::Rgb(30, 30, 46);
+const CTP_TEXT: Color = Color::Rgb(205, 214, 244);
+const CTP_SUBTEXT0: Color = Color::Rgb(166, 173, 200);
+const CTP_SURFACE1: Color = Color::Rgb(69, 71, 90);
+const CTP_PEACH: Color = Color::Rgb(250, 179, 135);
+const CTP_MAUVE: Color = Color::Rgb(203, 166, 247);
+const CTP_RED: Color = Color::Rgb(243, 139, 168);
+const CTP_GREEN: Color = Color::Rgb(166, 227, 161);
 
 const GUTTER: &str = "\u{258c}";
 const CURSOR: &str = "\u{2588}";
 
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
-    let bg = Block::default().style(Style::default().bg(OMNI_BG));
+    let bg = Block::default().style(Style::default().bg(CTP_BASE));
     f.render_widget(bg, area);
 
     let chunks = Layout::default()
@@ -64,24 +70,24 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
     let title_line = Line::from(vec![
         Span::styled(
             "omel",
-            Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD),
+            Style::default().fg(CTP_TEXT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "ette",
-            Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD),
+            Style::default().fg(CTP_PEACH).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(
             "crack open your databases",
-            Style::default().fg(OMNI_INK).add_modifier(Modifier::ITALIC),
+            Style::default().fg(CTP_TEXT).add_modifier(Modifier::ITALIC),
         ),
     ]);
 
     let p = Paragraph::new(vec![
         title_line,
-        Line::from(Span::styled(header_line, Style::default().fg(OMNI_INK))),
+        Line::from(Span::styled(header_line, Style::default().fg(CTP_TEXT))),
     ])
-    .style(Style::default().bg(OMNI_BG));
+    .style(Style::default().bg(CTP_BASE));
     f.render_widget(p, area);
 }
 
@@ -91,7 +97,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         .status
         .as_ref()
         .map_or_else(|| base.to_owned(), |s| format!("{base}    [{s}]"));
-    let p = Paragraph::new(line).style(Style::default().fg(OMNI_RED).bg(OMNI_BG));
+    let p = Paragraph::new(line).style(Style::default().fg(CTP_SUBTEXT0).bg(CTP_BASE));
     f.render_widget(p, area);
 }
 
@@ -110,14 +116,14 @@ fn draw_notebook(f: &mut Frame, area: Rect, app: &App) {
     let offset = max_offset.saturating_sub(app.scroll_offset.min(max_offset));
 
     let p = Paragraph::new(lines)
-        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
+        .style(Style::default().bg(CTP_BASE).fg(CTP_TEXT))
         .wrap(Wrap { trim: false })
         .scroll((offset, 0));
     f.render_widget(p, area);
 }
 
 fn gutter_span() -> Span<'static> {
-    Span::styled(GUTTER.to_owned(), Style::default().fg(OMNI_RED))
+    Span::styled(GUTTER.to_owned(), Style::default().fg(CTP_PEACH))
 }
 
 fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, width: usize) {
@@ -132,15 +138,19 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
     let pad = width.saturating_sub(used + status_str.chars().count() + 1);
     let padding: String = std::iter::repeat_n(' ', pad).collect();
 
+    let status_color = match cell.status {
+        CellStatus::Ok => CTP_GREEN,
+        CellStatus::Error => CTP_RED,
+    };
     lines.push(Line::from(vec![
         gutter_span(),
         Span::styled(
             label,
-            Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD),
+            Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(query_first_line, Style::default().fg(OMNI_INK)),
+        Span::styled(query_first_line, Style::default().fg(CTP_TEXT)),
         Span::raw(padding),
-        Span::styled(status_str, Style::default().fg(OMNI_INK)),
+        Span::styled(status_str, Style::default().fg(status_color)),
         Span::raw(" "),
     ]));
 
@@ -148,7 +158,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
         lines.push(Line::from(vec![
             gutter_span(),
             Span::raw("     "),
-            Span::styled(extra.to_owned(), Style::default().fg(OMNI_INK)),
+            Span::styled(extra.to_owned(), Style::default().fg(CTP_TEXT)),
         ]));
     }
 
@@ -159,7 +169,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
             lines.push(Line::from(vec![
                 gutter_span(),
                 Span::raw("     "),
-                Span::styled(line.to_owned(), Style::default().fg(OMNI_RED)),
+                Span::styled(line.to_owned(), Style::default().fg(CTP_RED)),
             ]));
         }
         lines.push(Line::from(vec![gutter_span()]));
@@ -168,7 +178,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
             lines.push(Line::from(vec![
                 gutter_span(),
                 Span::raw("     "),
-                Span::styled("(no columns)".to_owned(), Style::default().fg(OMNI_INK)),
+                Span::styled("(no columns)".to_owned(), Style::default().fg(CTP_TEXT)),
             ]));
         } else {
             let widths = compute_widths(qr);
@@ -184,7 +194,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
                 Span::raw("     "),
                 Span::styled(
                     header,
-                    Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD),
+                    Style::default().fg(CTP_TEXT).add_modifier(Modifier::BOLD),
                 ),
             ]));
             for row in qr.rows.iter().take(20) {
@@ -197,7 +207,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
                 lines.push(Line::from(vec![
                     gutter_span(),
                     Span::raw("     "),
-                    Span::styled(row_str, Style::default().fg(OMNI_INK)),
+                    Span::styled(row_str, Style::default().fg(CTP_TEXT)),
                 ]));
             }
         }
@@ -216,7 +226,7 @@ fn push_finalized_cell(lines: &mut Vec<Line<'static>>, n: usize, cell: &Cell, wi
         lines.push(Line::from(vec![
             gutter_span(),
             Span::raw("  "),
-            Span::styled(line, Style::default().fg(OMNI_INK)),
+            Span::styled(line, Style::default().fg(CTP_TEXT)),
         ]));
         lines.push(Line::from(vec![gutter_span()]));
     }
@@ -231,18 +241,18 @@ fn push_active_cell(lines: &mut Vec<Line<'static>>, n: usize, buffer: &str) {
         gutter_span(),
         Span::styled(
             label,
-            Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD),
+            Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(first, Style::default().fg(OMNI_INK)),
-        Span::styled(CURSOR.to_owned(), Style::default().fg(OMNI_RED)),
+        Span::styled(first, Style::default().fg(CTP_TEXT)),
+        Span::styled(CURSOR.to_owned(), Style::default().fg(CTP_MAUVE)),
         Span::raw("  "),
-        Span::styled(suffix.to_owned(), Style::default().fg(OMNI_INK)),
+        Span::styled(suffix.to_owned(), Style::default().fg(CTP_SUBTEXT0)),
     ]));
     for extra in buf_lines {
         lines.push(Line::from(vec![
             gutter_span(),
             Span::raw("     "),
-            Span::styled(extra.to_owned(), Style::default().fg(OMNI_INK)),
+            Span::styled(extra.to_owned(), Style::default().fg(CTP_TEXT)),
         ]));
     }
     lines.push(Line::from(vec![gutter_span()]));
@@ -287,8 +297,8 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" goto ")
-        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
-        .border_style(Style::default().fg(OMNI_RED));
+        .style(Style::default().bg(CTP_BASE).fg(CTP_TEXT))
+        .border_style(Style::default().fg(CTP_MAUVE));
     f.render_widget(block, popup);
 
     let inner = Rect {
@@ -312,11 +322,11 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
             let active = app.goto_focus == GotoFocus::Connections && i == app.goto_conn_idx;
             let style = if active {
                 Style::default()
-                    .fg(OMNI_INK)
-                    .bg(OMNI_RED)
+                    .fg(CTP_TEXT)
+                    .bg(CTP_SURFACE1)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(OMNI_INK)
+                Style::default().fg(CTP_TEXT)
             };
             Line::from(Span::styled(format!(" {} ", c.label), style))
         })
@@ -326,7 +336,7 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::BOTTOM)
             .title(" connections ")
-            .style(Style::default().fg(OMNI_INK)),
+            .style(Style::default().fg(CTP_TEXT)),
     );
     f.render_widget(conn_p, halves[0]);
 
@@ -338,11 +348,11 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
             let active = app.goto_focus == GotoFocus::Tables && i == app.goto_table_idx;
             let style = if active {
                 Style::default()
-                    .fg(OMNI_INK)
-                    .bg(OMNI_RED)
+                    .fg(CTP_TEXT)
+                    .bg(CTP_SURFACE1)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(OMNI_INK)
+                Style::default().fg(CTP_TEXT)
             };
             Line::from(Span::styled(format!(" {} ", t.name), style))
         })
@@ -352,7 +362,7 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::NONE)
             .title(" tables ")
-            .style(Style::default().fg(OMNI_INK)),
+            .style(Style::default().fg(CTP_TEXT)),
     );
     f.render_widget(table_p, halves[1]);
 }
