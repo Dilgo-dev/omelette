@@ -1,0 +1,47 @@
+[package]
+name = "omnidb"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+wildcard_imports = "allow"
+
+unwrap_used = "warn"
+expect_used = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+str_to_string = "warn"
+
+[[bin]]
+name = "omnidb"
+path = "src/cli/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "mysql", "macros", "chrono"] }
+mongodb = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+directories = "5"
+async-trait = "0.1"
+futures = "0.3"
