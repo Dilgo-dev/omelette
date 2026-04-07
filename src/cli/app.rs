@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::Result;
 use tokio::runtime::{Builder, Runtime};
 
@@ -7,45 +9,53 @@ use omelette::core::engine::Engine;
 use omelette::core::result::QueryResult;
 use omelette::core::sqlite::SqliteBackend;
 
-const PREVIEW_LIMIT: u32 = 50;
-
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
-pub enum Focus {
-    #[default]
-    Connections,
-    Schema,
-    Preview,
-}
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     Normal,
-    ConfirmDelete,
-    Rename,
-    EditingQuery,
+    Goto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellStatus {
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cell {
+    pub query: String,
+    pub result: Option<QueryResult>,
+    pub error: Option<String>,
+    pub duration_ms: u128,
+    pub status: CellStatus,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub enum GotoFocus {
+    #[default]
+    Connections,
+    Tables,
 }
 
 pub struct App {
     pub should_quit: bool,
     pub connections: ConnectionStore,
     pub selected: usize,
-    pub focus: Focus,
     pub mode: Mode,
-    pub rename_buffer: String,
     pub status: Option<String>,
 
     pub tables: Vec<TableName>,
-    pub selected_table: usize,
     pub loaded_id: Option<String>,
-    pub preview: Option<QueryResult>,
-    pub preview_row_offset: usize,
-    pub preview_col_offset: usize,
-    pub previewed_table: Option<String>,
 
-    pub query_buffer: String,
-    pub query_result: Option<QueryResult>,
-    pub query_error: Option<String>,
+    pub cells: Vec<Cell>,
+    pub active_query: String,
+    pub scroll_offset: u16,
+
+    pub goto_focus: GotoFocus,
+    pub goto_conn_idx: usize,
+    pub goto_table_idx: usize,
+
     backend: Option<Box<dyn Backend>>,
     rt: Runtime,
 }
@@ -55,10 +65,7 @@ impl std::fmt::Debug for App {
         f.debug_struct("App")
             .field("should_quit", &self.should_quit)
             .field("selected", &self.selected)
-            .field("focus", &self.focus)
-            .field("mode", &self.mode)
-            .field("loaded_id", &self.loaded_id)
-            .field("tables", &self.tables.len())
+            .field("cells", &self.cells.len())
             .finish_non_exhaustive()
     }
 }
@@ -70,144 +77,174 @@ impl App {
             should_quit: false,
             connections: ConnectionStore::load()?,
             selected: 0,
-            focus: Focus::Connections,
             mode: Mode::Normal,
-            rename_buffer: String::new(),
             status: None,
             tables: Vec::new(),
-            selected_table: 0,
             loaded_id: None,
-            preview: None,
-            preview_row_offset: 0,
-            preview_col_offset: 0,
-            previewed_table: None,
-            query_buffer: String::new(),
-            query_result: None,
-            query_error: None,
+            cells: Vec::new(),
+            active_query: String::new(),
+            scroll_offset: 0,
+            goto_focus: GotoFocus::Connections,
+            goto_conn_idx: 0,
+            goto_table_idx: 0,
             backend: None,
             rt,
         })
     }
 
-    pub fn enter_query_mode(&mut self) {
+    pub fn active_push(&mut self, c: char) {
+        self.active_query.push(c);
+    }
+
+    pub fn active_pop(&mut self) {
+        self.active_query.pop();
+    }
+
+    pub fn active_newline(&mut self) {
+        self.active_query.push('\n');
+    }
+
+    pub fn run_active_cell(&mut self) {
         self.ensure_backend();
-        self.mode = Mode::EditingQuery;
-        self.query_error = None;
-    }
-
-    pub fn query_push(&mut self, c: char) {
-        self.query_buffer.push(c);
-    }
-
-    pub fn query_pop(&mut self) {
-        self.query_buffer.pop();
-    }
-
-    pub fn query_newline(&mut self) {
-        self.query_buffer.push('\n');
-    }
-
-    pub fn run_query(&mut self) {
-        let Some(b) = &self.backend else {
-            self.query_error = Some("no active connection".into());
-            return;
-        };
-        let sql = self.query_buffer.clone();
+        let sql = self.active_query.clone();
         if sql.trim().is_empty() {
-            self.query_error = Some("empty query".into());
+            self.status = Some("empty query".into());
             return;
         }
-        match self.rt.block_on(b.run_query(&sql)) {
+        let Some(b) = &self.backend else {
+            self.cells.push(Cell {
+                query: sql,
+                result: None,
+                error: Some("no active connection".into()),
+                duration_ms: 0,
+                status: CellStatus::Error,
+            });
+            self.active_query.clear();
+            return;
+        };
+        let start = Instant::now();
+        let res = self.rt.block_on(b.run_query(&sql));
+        let duration_ms = start.elapsed().as_millis();
+        let cell = match res {
             Ok(qr) => {
                 let n = qr.rows.len();
-                self.query_result = Some(qr);
-                self.query_error = None;
-                self.status = Some(format!("query ok: {n} row(s)"));
+                self.status = Some(format!("ok: {n} row(s) in {duration_ms} ms"));
+                Cell {
+                    query: sql,
+                    result: Some(qr),
+                    error: None,
+                    duration_ms,
+                    status: CellStatus::Ok,
+                }
             }
             Err(e) => {
-                self.query_error = Some(format!("{e}"));
                 self.status = Some("query error".into());
+                Cell {
+                    query: sql,
+                    result: None,
+                    error: Some(format!("{e}")),
+                    duration_ms,
+                    status: CellStatus::Error,
+                }
             }
-        }
-    }
-
-    pub fn cycle_focus(&mut self) {
-        self.focus = match self.focus {
-            Focus::Connections => Focus::Schema,
-            Focus::Schema => Focus::Preview,
-            Focus::Preview => Focus::Connections,
         };
-        if self.focus == Focus::Schema {
-            self.ensure_backend();
-        }
+        self.cells.push(cell);
+        self.active_query.clear();
+        self.scroll_offset = 0;
     }
 
-    pub fn select_next(&mut self) {
-        if self.connections.connections.is_empty() {
-            self.selected = 0;
-            return;
-        }
-        self.selected = (self.selected + 1) % self.connections.connections.len();
-        self.invalidate_backend();
+    pub fn new_cell(&mut self) {
+        self.active_query.clear();
+        self.scroll_offset = 0;
     }
 
-    pub fn select_prev(&mut self) {
-        if self.connections.connections.is_empty() {
-            self.selected = 0;
-            return;
-        }
-        if self.selected == 0 {
-            self.selected = self.connections.connections.len() - 1;
-        } else {
-            self.selected -= 1;
-        }
-        self.invalidate_backend();
+    pub const fn scroll_up(&mut self, n: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_add(n);
     }
 
-    pub fn select_next_table(&mut self) {
-        if self.tables.is_empty() {
-            self.selected_table = 0;
-            return;
-        }
-        self.selected_table = (self.selected_table + 1) % self.tables.len();
-        self.load_preview();
+    pub const fn scroll_down(&mut self, n: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
 
-    pub fn select_prev_table(&mut self) {
-        if self.tables.is_empty() {
-            self.selected_table = 0;
-            return;
-        }
-        if self.selected_table == 0 {
-            self.selected_table = self.tables.len() - 1;
-        } else {
-            self.selected_table -= 1;
-        }
-        self.load_preview();
+    pub fn open_goto(&mut self) {
+        self.ensure_backend();
+        self.mode = Mode::Goto;
+        self.goto_focus = GotoFocus::Connections;
+        self.goto_conn_idx = self.selected;
+        self.goto_table_idx = 0;
     }
 
-    pub fn scroll_preview_down(&mut self) {
-        if let Some(p) = &self.preview {
-            if self.preview_row_offset + 1 < p.rows.len() {
-                self.preview_row_offset += 1;
+    pub fn goto_next(&mut self) {
+        match self.goto_focus {
+            GotoFocus::Connections => {
+                if !self.connections.connections.is_empty() {
+                    self.goto_conn_idx =
+                        (self.goto_conn_idx + 1) % self.connections.connections.len();
+                }
+            }
+            GotoFocus::Tables => {
+                if !self.tables.is_empty() {
+                    self.goto_table_idx = (self.goto_table_idx + 1) % self.tables.len();
+                }
             }
         }
     }
 
-    pub const fn scroll_preview_up(&mut self) {
-        self.preview_row_offset = self.preview_row_offset.saturating_sub(1);
-    }
-
-    pub fn scroll_preview_right(&mut self) {
-        if let Some(p) = &self.preview {
-            if self.preview_col_offset + 1 < p.columns.len() {
-                self.preview_col_offset += 1;
+    pub fn goto_prev(&mut self) {
+        match self.goto_focus {
+            GotoFocus::Connections => {
+                if !self.connections.connections.is_empty() {
+                    if self.goto_conn_idx == 0 {
+                        self.goto_conn_idx = self.connections.connections.len() - 1;
+                    } else {
+                        self.goto_conn_idx -= 1;
+                    }
+                }
+            }
+            GotoFocus::Tables => {
+                if !self.tables.is_empty() {
+                    if self.goto_table_idx == 0 {
+                        self.goto_table_idx = self.tables.len() - 1;
+                    } else {
+                        self.goto_table_idx -= 1;
+                    }
+                }
             }
         }
     }
 
-    pub const fn scroll_preview_left(&mut self) {
-        self.preview_col_offset = self.preview_col_offset.saturating_sub(1);
+    pub const fn goto_toggle(&mut self) {
+        self.goto_focus = match self.goto_focus {
+            GotoFocus::Connections => GotoFocus::Tables,
+            GotoFocus::Tables => GotoFocus::Connections,
+        };
+    }
+
+    pub fn goto_commit(&mut self) {
+        match self.goto_focus {
+            GotoFocus::Connections => {
+                if self.goto_conn_idx < self.connections.connections.len() {
+                    self.selected = self.goto_conn_idx;
+                    self.invalidate_backend();
+                    self.ensure_backend();
+                }
+                self.mode = Mode::Normal;
+            }
+            GotoFocus::Tables => {
+                if let Some(t) = self.tables.get(self.goto_table_idx) {
+                    let snippet = format!("SELECT * FROM {} LIMIT 50", t.name);
+                    if !self.active_query.is_empty() {
+                        self.active_query.push('\n');
+                    }
+                    self.active_query.push_str(&snippet);
+                }
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
+    pub const fn close_goto(&mut self) {
+        self.mode = Mode::Normal;
     }
 
     pub fn add_placeholder(&mut self) -> Result<()> {
@@ -225,96 +262,12 @@ impl App {
         Ok(())
     }
 
-    pub fn delete_selected(&mut self) -> Result<()> {
-        let Some(conn) = self.current() else {
-            return Ok(());
-        };
-        let id = conn.id.clone();
-        self.connections.remove(&id);
-        if self.selected >= self.connections.connections.len()
-            && !self.connections.connections.is_empty()
-        {
-            self.selected = self.connections.connections.len() - 1;
-        }
-        self.connections.save()?;
-        self.invalidate_backend();
-        self.status = Some("connection deleted".into());
-        self.mode = Mode::Normal;
-        Ok(())
-    }
-
-    pub fn start_rename(&mut self) {
-        if let Some(c) = self.current() {
-            self.rename_buffer = c.label.clone();
-            self.mode = Mode::Rename;
-        }
-    }
-
-    pub fn commit_rename(&mut self) -> Result<()> {
-        if let Some(c) = self.current() {
-            let id = c.id.clone();
-            let new_label = self.rename_buffer.clone();
-            self.connections.update(&id, |c| c.label = new_label);
-            self.connections.save()?;
-            self.status = Some("renamed".into());
-        }
-        self.mode = Mode::Normal;
-        self.rename_buffer.clear();
-        Ok(())
-    }
-
-    pub fn cancel_mode(&mut self) {
-        self.mode = Mode::Normal;
-        self.rename_buffer.clear();
-    }
-
-    pub const fn exit_query_mode(&mut self) {
-        self.mode = Mode::Normal;
-    }
-
     pub fn refresh_schema(&mut self) {
         self.ensure_backend();
-        if let Some(b) = &self.backend {
-            match self.rt.block_on(b.list_tables(None)) {
-                Ok(tables) => {
-                    self.tables = tables;
-                    if self.selected_table >= self.tables.len() {
-                        self.selected_table = 0;
-                    }
-                    self.status = Some(format!("loaded {} table(s)", self.tables.len()));
-                }
-                Err(e) => self.status = Some(format!("list_tables: {e}")),
-            }
-        }
-        self.load_preview();
-    }
-
-    pub fn load_preview(&mut self) {
-        let Some(table) = self.tables.get(self.selected_table).cloned() else {
-            self.preview = None;
-            self.previewed_table = None;
-            return;
-        };
-        if self.previewed_table.as_deref() == Some(table.name.as_str()) {
-            return;
-        }
-        let Some(b) = &self.backend else {
-            return;
-        };
-        match self.rt.block_on(b.preview_table(&table, PREVIEW_LIMIT)) {
-            Ok(qr) => {
-                let rows = qr.rows.len();
-                self.preview = Some(qr);
-                self.previewed_table = Some(table.name.clone());
-                self.preview_row_offset = 0;
-                self.preview_col_offset = 0;
-                self.status = Some(format!("preview {}: {rows} row(s)", table.name));
-            }
-            Err(e) => {
-                self.preview = None;
-                self.previewed_table = None;
-                self.status = Some(format!("preview: {e}"));
-            }
+        if let Some(b) = &self.backend
+            && let Ok(tables) = self.rt.block_on(b.list_tables(None))
+        {
+            self.tables = tables;
         }
     }
 
@@ -364,11 +317,6 @@ impl App {
         self.backend = None;
         self.loaded_id = None;
         self.tables.clear();
-        self.selected_table = 0;
-        self.preview = None;
-        self.previewed_table = None;
-        self.preview_row_offset = 0;
-        self.preview_col_offset = 0;
     }
 
     pub fn current(&self) -> Option<&Connection> {

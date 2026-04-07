@@ -68,11 +68,13 @@ impl ConnectionStore {
         self.connections.push(connection);
     }
 
+    #[cfg(test)]
     pub fn remove(&mut self, id: &str) -> Option<Connection> {
         let idx = self.connections.iter().position(|c| c.id == id)?;
         Some(self.connections.remove(idx))
     }
 
+    #[cfg(test)]
     pub fn update(&mut self, id: &str, update: impl FnOnce(&mut Connection)) -> bool {
         self.connections
             .iter_mut()
