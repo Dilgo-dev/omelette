@@ -31,10 +31,7 @@ fn main() -> Result<()> {
     res
 }
 
-fn run<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> Result<()> {
+fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     while !app.should_quit {
         terminal.draw(|f| ui::draw(f, app))?;
         if let Event::Key(key) = event::read()?

@@ -14,12 +14,22 @@ pub fn draw(f: &mut Frame, _app: &App) {
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("omel", Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD)),
-        Span::styled("ette", Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "omel",
+            Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "ette",
+            Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
         Span::styled(
             "crack open your databases",
@@ -27,7 +37,11 @@ pub fn draw(f: &mut Frame, _app: &App) {
         ),
     ]))
     .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL).style(Style::default().bg(OMNI_BG)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(OMNI_BG)),
+    );
     f.render_widget(title, chunks[0]);
 
     let body = Paragraph::new("Press q to quit.")
