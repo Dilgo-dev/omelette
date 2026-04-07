@@ -4,12 +4,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-use crate::app::{App, Mode};
+use crate::app::{App, Focus, Mode};
 use omelette::core::engine::Engine;
 
 const OMNI_RED: Color = Color::Rgb(178, 34, 34);
 const OMNI_BG: Color = Color::Rgb(20, 20, 20);
 const OMNI_INK: Color = Color::Rgb(245, 240, 232);
+const DIM: Color = Color::Rgb(120, 120, 120);
 
 const SQL_TEAL: Color = Color::Rgb(78, 205, 196);
 const PG_BLUE: Color = Color::Rgb(70, 130, 200);
@@ -78,10 +79,24 @@ fn draw_title(f: &mut Frame, area: Rect) {
 fn draw_main(f: &mut Frame, area: Rect, app: &App) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Min(0)])
+        .constraints([
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Min(0),
+        ])
         .split(area);
     draw_connections_panel(f, cols[0], app);
-    draw_body_panel(f, cols[1], app);
+    draw_schema_panel(f, cols[1], app);
+    draw_body_panel(f, cols[2], app);
+}
+
+fn focus_block(title: &str, focused: bool) -> Block<'_> {
+    let border = if focused { OMNI_RED } else { DIM };
+    Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
+        .border_style(Style::default().fg(border))
 }
 
 fn draw_connections_panel(f: &mut Frame, area: Rect, app: &App) {
@@ -111,12 +126,10 @@ fn draw_connections_panel(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" connections ")
-                .style(Style::default().bg(OMNI_BG).fg(OMNI_INK)),
-        )
+        .block(focus_block(
+            " connections ",
+            app.focus == Focus::Connections,
+        ))
         .highlight_style(
             Style::default()
                 .bg(OMNI_RED)
@@ -132,12 +145,54 @@ fn draw_connections_panel(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
+fn draw_schema_panel(f: &mut Frame, area: Rect, app: &App) {
+    let items: Vec<ListItem> = app
+        .tables
+        .iter()
+        .map(|t| {
+            ListItem::new(Line::from(vec![
+                Span::styled(" T ", Style::default().fg(OMNI_BG).bg(SQL_TEAL)),
+                Span::raw(" "),
+                Span::styled(t.name.clone(), Style::default().fg(OMNI_INK)),
+            ]))
+        })
+        .collect();
+
+    let block = focus_block(" schema ", app.focus == Focus::Schema);
+
+    if items.is_empty() {
+        let hint = if app.current().is_none() {
+            "no connection"
+        } else if app.loaded_id.is_none() {
+            "press Tab to load"
+        } else {
+            "(no tables)"
+        };
+        let p = Paragraph::new(hint)
+            .style(Style::default().bg(OMNI_BG).fg(DIM))
+            .block(block);
+        f.render_widget(p, area);
+        return;
+    }
+
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(OMNI_RED)
+            .fg(OMNI_INK)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let mut state = ListState::default();
+    state.select(Some(app.selected_table));
+    f.render_stateful_widget(list, area, &mut state);
+}
+
 fn draw_body_panel(f: &mut Frame, area: Rect, app: &App) {
     let body = app.current().map_or_else(
         || "no connection yet\n\npress 'a' to add one".into(),
         |c| {
             format!(
-                "{}\n\nengine: {}\ndsn:    {}\n\n(open in editor coming in #7)",
+                "{}\n\nengine: {}\ndsn:    {}\n\n(table preview lands in #8)",
                 c.label,
                 c.engine.label(),
                 if c.dsn.is_empty() { "<empty>" } else { &c.dsn },
@@ -146,13 +201,16 @@ fn draw_body_panel(f: &mut Frame, area: Rect, app: &App) {
     );
     let p = Paragraph::new(body)
         .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
-        .block(Block::default().borders(Borders::ALL).title(" details "));
+        .block(focus_block(" details ", false));
     f.render_widget(p, area);
 }
 
 fn draw_help(f: &mut Frame, area: Rect, app: &App) {
     let text = match app.mode {
-        Mode::Normal => "j/k: move  a: add  r: rename  d: delete  q: quit",
+        Mode::Normal => match app.focus {
+            Focus::Connections => "Tab: focus  j/k: move  a: add  r: rename  d: delete  q: quit",
+            Focus::Schema => "Tab: focus  j/k: move  R: refresh  q: quit",
+        },
         Mode::ConfirmDelete => "y: confirm delete  n/Esc: cancel",
         Mode::Rename => "type new label  Enter: save  Esc: cancel",
     };

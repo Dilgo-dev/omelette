@@ -60,4 +60,29 @@ test_connections_crud() {
 }
 run_test "connections / add rename delete round trip" test_connections_crud
 
+# ────────────────────────────────────────────────────────────────────
+# 02 / schema browser: focus toggle, empty state, refresh
+# ────────────────────────────────────────────────────────────────────
+test_schema_panel() {
+  local s
+  s=$(om_start schema) || return 1
+  assert_contains "$s" "schema" || return 1
+
+  om_send "$s" a
+  assert_contains "$s" "New SQLite 1" || return 1
+
+  om_send "$s" Tab
+  assert_contains "$s" "no tables" || return 1
+  assert_contains "$s" "Tab: focus" || return 1
+  assert_contains "$s" "R: refresh" || return 1
+
+  om_send "$s" R
+  assert_contains "$s" "loaded 0 table" || return 1
+
+  om_send "$s" Tab
+  assert_contains "$s" "a: add" || return 1
+  om_stop "$s"
+}
+run_test "schema / panel toggles focus and refreshes" test_schema_panel
+
 summary

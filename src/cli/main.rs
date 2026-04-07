@@ -13,7 +13,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use app::{App, Mode};
+use app::{App, Focus, Mode};
 
 fn main() -> Result<()> {
     enable_raw_mode()?;
@@ -46,19 +46,7 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
 
 fn handle_key(app: &mut App, code: KeyCode) -> Result<()> {
     match app.mode {
-        Mode::Normal => match code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('j') | KeyCode::Down => app.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
-            KeyCode::Char('a') => app.add_placeholder()?,
-            KeyCode::Char('d') => {
-                if app.current().is_some() {
-                    app.mode = Mode::ConfirmDelete;
-                }
-            }
-            KeyCode::Char('r') => app.start_rename(),
-            _ => {}
-        },
+        Mode::Normal => handle_normal(app, code)?,
         Mode::ConfirmDelete => match code {
             KeyCode::Char('y') => app.delete_selected()?,
             KeyCode::Char('n') | KeyCode::Esc => app.cancel_mode(),
@@ -71,6 +59,38 @@ fn handle_key(app: &mut App, code: KeyCode) -> Result<()> {
                 app.rename_buffer.pop();
             }
             KeyCode::Char(c) => app.rename_buffer.push(c),
+            _ => {}
+        },
+    }
+    Ok(())
+}
+
+fn handle_normal(app: &mut App, code: KeyCode) -> Result<()> {
+    if matches!(code, KeyCode::Tab | KeyCode::BackTab) {
+        app.cycle_focus();
+        return Ok(());
+    }
+    if matches!(code, KeyCode::Char('q')) {
+        app.should_quit = true;
+        return Ok(());
+    }
+    match app.focus {
+        Focus::Connections => match code {
+            KeyCode::Char('j') | KeyCode::Down => app.select_next(),
+            KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+            KeyCode::Char('a') => app.add_placeholder()?,
+            KeyCode::Char('d') => {
+                if app.current().is_some() {
+                    app.mode = Mode::ConfirmDelete;
+                }
+            }
+            KeyCode::Char('r') => app.start_rename(),
+            _ => {}
+        },
+        Focus::Schema => match code {
+            KeyCode::Char('j') | KeyCode::Down => app.select_next_table(),
+            KeyCode::Char('k') | KeyCode::Up => app.select_prev_table(),
+            KeyCode::Char('R') => app.refresh_schema(),
             _ => {}
         },
     }
