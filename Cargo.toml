@@ -1,5 +1,5 @@
 [package]
-name = "omnidb"
+name = "omelette"
 version = "0.1.0"
 edition = "2024"
 
@@ -28,7 +28,7 @@ unimplemented = "warn"
 str_to_string = "warn"
 
 [[bin]]
-name = "omnidb"
+name = "omelette"
 path = "src/cli/main.rs"
 
 [dependencies]

@@ -6,7 +6,7 @@ build:
 	cargo build --release
 
 install: build
-	cp target/release/omnidb ~/.local/bin/omnidb
+	cp target/release/omelette ~/.local/bin/omelette
 
 clean:
 	cargo clean

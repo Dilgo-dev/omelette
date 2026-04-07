@@ -18,11 +18,11 @@ pub fn draw(f: &mut Frame, _app: &App) {
         .split(area);
 
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("omni", Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD)),
-        Span::styled("db", Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD)),
+        Span::styled("omel", Style::default().fg(OMNI_INK).add_modifier(Modifier::BOLD)),
+        Span::styled("ette", Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
-            "one TUI for every database",
+            "crack open your databases",
             Style::default().fg(OMNI_INK).add_modifier(Modifier::ITALIC),
         ),
     ]))
