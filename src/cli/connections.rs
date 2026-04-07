@@ -17,7 +17,6 @@ pub struct Connection {
     pub dsn: String,
 }
 
-#[allow(dead_code)] // CRUD API consumed by the connections list UI in #5
 impl Connection {
     pub fn new(label: impl Into<String>, engine: Engine, dsn: impl Into<String>) -> Self {
         let nanos = std::time::SystemTime::now()
@@ -65,18 +64,15 @@ impl ConnectionStore {
         Ok(())
     }
 
-    #[allow(dead_code)] // wired in #5
     pub fn add(&mut self, connection: Connection) {
         self.connections.push(connection);
     }
 
-    #[allow(dead_code)] // wired in #5
     pub fn remove(&mut self, id: &str) -> Option<Connection> {
         let idx = self.connections.iter().position(|c| c.id == id)?;
         Some(self.connections.remove(idx))
     }
 
-    #[allow(dead_code)] // wired in #5
     pub fn update(&mut self, id: &str, update: impl FnOnce(&mut Connection)) -> bool {
         self.connections
             .iter_mut()
@@ -87,7 +83,7 @@ impl ConnectionStore {
             })
     }
 
-    #[allow(dead_code)] // wired in #5
+    #[cfg(test)]
     pub fn get(&self, id: &str) -> Option<&Connection> {
         self.connections.iter().find(|c| c.id == id)
     }

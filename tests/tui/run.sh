@@ -30,4 +30,34 @@ test_smoke_boot() {
 }
 run_test "smoke / boots and shows title" test_smoke_boot
 
+# ────────────────────────────────────────────────────────────────────
+# 01 / connections list: add, rename, delete
+# ────────────────────────────────────────────────────────────────────
+test_connections_crud() {
+  local s
+  s=$(om_start connections) || return 1
+  assert_contains "$s" "connections" || return 1
+  assert_contains "$s" "no connection yet" || return 1
+
+  om_send "$s" a
+  assert_contains "$s" "New SQLite 1" || return 1
+  assert_contains "$s" "SQL" || return 1
+
+  om_send "$s" r
+  for _ in $(seq 1 12); do tmux send-keys -t "$s" BSpace; done
+  sleep 0.2
+  om_type "$s" "local pgsql"
+  om_send "$s" Enter
+  assert_contains "$s" "local pgsql" || return 1
+  assert_contains "$s" "renamed" || return 1
+
+  om_send "$s" d
+  assert_contains "$s" "confirm delete" || return 1
+  om_send "$s" y
+  assert_contains "$s" "no connection yet" || return 1
+  assert_contains "$s" "deleted" || return 1
+  om_stop "$s"
+}
+run_test "connections / add rename delete round trip" test_connections_crud
+
 summary
