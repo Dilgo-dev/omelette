@@ -56,30 +56,48 @@ const SPLASH_ART: [&str; 6] = [
     "        \\/      \\/     \\/          \\/                \\/ ",
 ];
 
+const GLITCH_CHARS: &[char] = &['$', '@', '#', '%', '*', '&', '!', '?', '+', '=', '~', '/'];
+
+fn glitch_for(row: usize, col: usize, frame: u32) -> char {
+    let seed = (row.wrapping_mul(131) ^ col.wrapping_mul(17) ^ (frame as usize).wrapping_mul(2657))
+        % GLITCH_CHARS.len();
+    GLITCH_CHARS[seed]
+}
+
 fn draw_splash(f: &mut Frame, area: Rect, app: &App) {
     let elapsed = SPLASH_TOTAL.saturating_sub(app.splash_frames);
-    // 6 lines reveal one every 4 frames (0..24), tagline at frame 28, hold to end
-    let lines_visible = ((elapsed / 4) as usize).min(SPLASH_ART.len());
-    let show_tagline = elapsed >= 28;
-    let show_hint = elapsed >= 38;
+    let show_tagline = elapsed >= 30;
+    let show_hint = elapsed >= 42;
 
     let art_width = SPLASH_ART[0].chars().count() as u16;
     let art_height = SPLASH_ART.len() as u16;
-    let block_height = art_height + 4; // art + blank + tagline + blank + hint
+    let block_height = art_height + 4;
 
     let x = area.x + (area.width.saturating_sub(art_width)) / 2;
     let y = area.y + (area.height.saturating_sub(block_height)) / 2;
 
+    // diagonal wave: cell (row, col) settles when elapsed >= (row + col / 4)
+    // total settle time = 5 + 56/4 = ~19 frames, fully revealed by frame 20
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(block_height as usize);
-    for (i, raw) in SPLASH_ART.iter().enumerate() {
-        if i < lines_visible {
-            lines.push(Line::from(Span::styled(
-                (*raw).to_owned(),
-                Style::default().fg(CTP_PEACH).add_modifier(Modifier::BOLD),
-            )));
-        } else {
-            lines.push(Line::from(""));
+    for (row, raw) in SPLASH_ART.iter().enumerate() {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (col, ch) in raw.chars().enumerate() {
+            let settle_at = (row as u32) + (col as u32) / 4;
+            let style = Style::default().fg(CTP_PEACH).add_modifier(Modifier::BOLD);
+            if ch == ' ' {
+                spans.push(Span::raw(" "));
+                continue;
+            }
+            if elapsed > settle_at {
+                spans.push(Span::styled(ch.to_string(), style));
+            } else if elapsed + 6 > settle_at {
+                let g = glitch_for(row, col, elapsed);
+                spans.push(Span::styled(g.to_string(), Style::default().fg(CTP_MAUVE)));
+            } else {
+                spans.push(Span::raw(" "));
+            }
         }
+        lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
     if show_tagline {
