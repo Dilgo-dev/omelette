@@ -49,7 +49,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match app.mode {
         Mode::ConfirmDelete => draw_confirm_delete(f, area, app),
         Mode::Rename => draw_rename(f, area, app),
-        Mode::Normal => {}
+        Mode::Normal | Mode::EditingQuery => {}
     }
 }
 
@@ -89,7 +89,29 @@ fn draw_main(f: &mut Frame, area: Rect, app: &App) {
         .split(area);
     draw_connections_panel(f, cols[0], app);
     draw_schema_panel(f, cols[1], app);
-    draw_body_panel(f, cols[2], app);
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .split(cols[2]);
+    draw_editor_panel(f, right[0], app);
+    draw_body_panel(f, right[1], app);
+}
+
+fn draw_editor_panel(f: &mut Frame, area: Rect, app: &App) {
+    let editing = app.mode == Mode::EditingQuery;
+    let block = focus_block(" query (e to edit, F5 to run, Esc to leave) ", editing);
+    let body = if app.query_buffer.is_empty() && !editing {
+        "press 'e' to start a query".to_owned()
+    } else if editing {
+        format!("{}_", app.query_buffer)
+    } else {
+        app.query_buffer.clone()
+    };
+    let p = Paragraph::new(body)
+        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
+        .block(block);
+    f.render_widget(p, area);
 }
 
 fn focus_block(title: &str, focused: bool) -> Block<'_> {
@@ -195,15 +217,26 @@ fn draw_schema_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_body_panel(f: &mut Frame, area: Rect, app: &App) {
-    let block = focus_block(" preview ", app.focus == Focus::Preview);
-    let Some(qr) = &app.preview else {
-        let hint = if app.current().is_none() {
-            "no connection".to_owned()
-        } else if app.tables.is_empty() {
-            "no table to preview".to_owned()
-        } else {
-            "select a table in the schema panel".to_owned()
-        };
+    let (title, qr_opt) = app
+        .query_result
+        .as_ref()
+        .map_or((" preview ", app.preview.as_ref()), |qr| {
+            (" results ", Some(qr))
+        });
+    let block = focus_block(title, app.focus == Focus::Preview);
+    let Some(qr) = qr_opt else {
+        let hint = app.query_error.as_ref().map_or_else(
+            || {
+                if app.current().is_none() {
+                    "no connection".to_owned()
+                } else if app.tables.is_empty() {
+                    "no table to preview".to_owned()
+                } else {
+                    "select a table in the schema panel".to_owned()
+                }
+            },
+            |e| format!("query error:\n\n{e}"),
+        );
         let p = Paragraph::new(hint)
             .style(Style::default().bg(OMNI_BG).fg(DIM))
             .block(block);
@@ -262,12 +295,15 @@ fn json_to_string(v: &serde_json::Value) -> String {
 fn draw_help(f: &mut Frame, area: Rect, app: &App) {
     let text = match app.mode {
         Mode::Normal => match app.focus {
-            Focus::Connections => "Tab: focus  j/k: move  a: add  r: rename  d: delete  q: quit",
-            Focus::Schema => "Tab: focus  j/k: move  R: refresh  q: quit",
-            Focus::Preview => "Tab: focus  hjkl: scroll  R: reload  q: quit",
+            Focus::Connections => {
+                "Tab: focus  j/k: move  a: add  r: rename  d: delete  e: query  q: quit"
+            }
+            Focus::Schema => "Tab: focus  j/k: move  R: refresh  e: query  q: quit",
+            Focus::Preview => "Tab: focus  hjkl: scroll  R: reload  e: query  q: quit",
         },
         Mode::ConfirmDelete => "y: confirm delete  n/Esc: cancel",
         Mode::Rename => "type new label  Enter: save  Esc: cancel",
+        Mode::EditingQuery => "type query  Enter: newline  F5: run  Esc: leave",
     };
     let line = app
         .status

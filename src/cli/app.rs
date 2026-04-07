@@ -23,6 +23,7 @@ pub enum Mode {
     Normal,
     ConfirmDelete,
     Rename,
+    EditingQuery,
 }
 
 pub struct App {
@@ -41,6 +42,10 @@ pub struct App {
     pub preview_row_offset: usize,
     pub preview_col_offset: usize,
     pub previewed_table: Option<String>,
+
+    pub query_buffer: String,
+    pub query_result: Option<QueryResult>,
+    pub query_error: Option<String>,
     backend: Option<Box<dyn Backend>>,
     rt: Runtime,
 }
@@ -76,9 +81,54 @@ impl App {
             preview_row_offset: 0,
             preview_col_offset: 0,
             previewed_table: None,
+            query_buffer: String::new(),
+            query_result: None,
+            query_error: None,
             backend: None,
             rt,
         })
+    }
+
+    pub fn enter_query_mode(&mut self) {
+        self.ensure_backend();
+        self.mode = Mode::EditingQuery;
+        self.query_error = None;
+    }
+
+    pub fn query_push(&mut self, c: char) {
+        self.query_buffer.push(c);
+    }
+
+    pub fn query_pop(&mut self) {
+        self.query_buffer.pop();
+    }
+
+    pub fn query_newline(&mut self) {
+        self.query_buffer.push('\n');
+    }
+
+    pub fn run_query(&mut self) {
+        let Some(b) = &self.backend else {
+            self.query_error = Some("no active connection".into());
+            return;
+        };
+        let sql = self.query_buffer.clone();
+        if sql.trim().is_empty() {
+            self.query_error = Some("empty query".into());
+            return;
+        }
+        match self.rt.block_on(b.run_query(&sql)) {
+            Ok(qr) => {
+                let n = qr.rows.len();
+                self.query_result = Some(qr);
+                self.query_error = None;
+                self.status = Some(format!("query ok: {n} row(s)"));
+            }
+            Err(e) => {
+                self.query_error = Some(format!("{e}"));
+                self.status = Some("query error".into());
+            }
+        }
     }
 
     pub fn cycle_focus(&mut self) {
@@ -216,6 +266,10 @@ impl App {
     pub fn cancel_mode(&mut self) {
         self.mode = Mode::Normal;
         self.rename_buffer.clear();
+    }
+
+    pub const fn exit_query_mode(&mut self) {
+        self.mode = Mode::Normal;
     }
 
     pub fn refresh_schema(&mut self) {

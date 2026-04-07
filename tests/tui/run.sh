@@ -109,4 +109,38 @@ test_preview_seeded() {
 }
 run_test "preview / seeded sqlite shows rows" test_preview_seeded
 
+# ────────────────────────────────────────────────────────────────────
+# 04 / query editor: type, run with F5, render results
+# ────────────────────────────────────────────────────────────────────
+test_query_editor() {
+  local s
+  s=$(om_start_seeded query) || return 1
+  om_send "$s" e
+  assert_contains "$s" "type query" || return 1
+  om_type "$s" "SELECT name, age FROM pets WHERE age > 3"
+  om_send "$s" F5
+  assert_contains "$s" "results" || return 1
+  assert_contains "$s" "milo" || return 1
+  assert_contains "$s" "pepper" || return 1
+  assert_missing "$s" "luna" || return 1
+  om_send "$s" Escape
+  om_stop "$s"
+}
+run_test "query / editor runs SQL and shows results" test_query_editor
+
+# ────────────────────────────────────────────────────────────────────
+# 05 / query editor: bad SQL renders an error
+# ────────────────────────────────────────────────────────────────────
+test_query_error() {
+  local s
+  s=$(om_start_seeded query_err) || return 1
+  om_send "$s" e
+  om_type "$s" "SELECT bogus FROM nope"
+  om_send "$s" F5
+  assert_contains "$s" "query error" || return 1
+  om_send "$s" Escape
+  om_stop "$s"
+}
+run_test "query / bad SQL surfaces an error" test_query_error
+
 summary

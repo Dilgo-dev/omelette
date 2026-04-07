@@ -61,6 +61,14 @@ fn handle_key(app: &mut App, code: KeyCode) -> Result<()> {
             KeyCode::Char(c) => app.rename_buffer.push(c),
             _ => {}
         },
+        Mode::EditingQuery => match code {
+            KeyCode::Esc => app.exit_query_mode(),
+            KeyCode::F(5) => app.run_query(),
+            KeyCode::Enter => app.query_newline(),
+            KeyCode::Backspace => app.query_pop(),
+            KeyCode::Char(c) => app.query_push(c),
+            _ => {}
+        },
     }
     Ok(())
 }
@@ -72,6 +80,10 @@ fn handle_normal(app: &mut App, code: KeyCode) -> Result<()> {
     }
     if matches!(code, KeyCode::Char('q')) {
         app.should_quit = true;
+        return Ok(());
+    }
+    if matches!(code, KeyCode::Char('e')) {
+        app.enter_query_mode();
         return Ok(());
     }
     match app.focus {
