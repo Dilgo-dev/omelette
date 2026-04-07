@@ -4,7 +4,7 @@ use serde_json::Value;
 use sqlx::sqlite::{SqlitePool, SqliteRow};
 use sqlx::{Column, Row};
 
-use crate::core::backend::{Backend, SchemaName, TableName};
+use crate::core::backend::{Backend, ColumnInfo, SchemaName, TableName};
 use crate::core::result::QueryResult;
 
 /// `SQLite` backend powered by `sqlx::SqlitePool`.
@@ -41,6 +41,21 @@ impl Backend for SqliteBackend {
             .map(|r| TableName {
                 schema: Some("main".into()),
                 name: r.get::<String, _>(0),
+            })
+            .collect())
+    }
+
+    async fn list_columns(&self, table: &TableName) -> Result<Vec<ColumnInfo>> {
+        let sql = format!("PRAGMA table_info(\"{}\")", table.name);
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .with_context(|| format!("listing columns of {}", table.name))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ColumnInfo {
+                name: r.get::<String, _>(1),
+                ty: r.get::<String, _>(2),
             })
             .collect())
     }

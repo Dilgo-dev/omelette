@@ -14,11 +14,19 @@ pub struct TableName {
     pub name: String,
 }
 
+/// A column inside a table (name + declared type).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub ty: String,
+}
+
 /// Common surface of every database backend (SQL or document).
 #[async_trait]
 pub trait Backend: Send + Sync {
     async fn list_schemas(&self) -> Result<Vec<SchemaName>>;
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableName>>;
+    async fn list_columns(&self, table: &TableName) -> Result<Vec<ColumnInfo>>;
     async fn preview_table(&self, table: &TableName, limit: u32) -> Result<QueryResult>;
     async fn run_query(&self, sql: &str) -> Result<QueryResult>;
 }
