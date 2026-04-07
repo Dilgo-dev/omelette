@@ -5,7 +5,9 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::connections::{Connection, ConnectionStore};
 use directories::ProjectDirs;
-use omelette::core::backend::{Backend, TableName};
+use std::collections::{HashMap, HashSet};
+
+use omelette::core::backend::{Backend, ColumnInfo, TableName};
 use omelette::core::engine::Engine;
 use omelette::core::result::QueryResult;
 use omelette::core::sqlite::SqliteBackend;
@@ -19,6 +21,24 @@ pub enum Mode {
     #[default]
     Normal,
     Goto,
+    Preview,
+    Complete,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteState {
+    pub items: Vec<String>,
+    pub idx: usize,
+    pub prefix_len: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreviewState {
+    pub table: String,
+    pub columns: Vec<ColumnInfo>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub column_names: Vec<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +85,14 @@ pub struct App {
     pub goto_focus: GotoFocus,
     pub goto_conn_idx: usize,
     pub goto_table_idx: usize,
+
+    pub explorer_open: bool,
+    pub explorer_focused: bool,
+    pub explorer_idx: usize,
+    pub explorer_expanded: HashSet<String>,
+    pub explorer_columns: HashMap<String, Vec<ColumnInfo>>,
+    pub preview: Option<PreviewState>,
+    pub complete: Option<CompleteState>,
 
     backend: Option<Box<dyn Backend>>,
     rt: Runtime,
@@ -113,6 +141,13 @@ impl App {
             goto_focus: GotoFocus::Connections,
             goto_conn_idx: 0,
             goto_table_idx: 0,
+            explorer_open: false,
+            explorer_focused: false,
+            explorer_idx: 0,
+            explorer_expanded: HashSet::new(),
+            explorer_columns: HashMap::new(),
+            preview: None,
+            complete: None,
             backend: None,
             rt,
         })
@@ -287,6 +322,213 @@ impl App {
         self.mode = Mode::Normal;
     }
 
+    pub fn toggle_explorer(&mut self) {
+        self.explorer_open = !self.explorer_open;
+        if self.explorer_open {
+            self.ensure_backend();
+            self.explorer_focused = true;
+            if self.explorer_idx >= self.tables.len() {
+                self.explorer_idx = 0;
+            }
+        } else {
+            self.explorer_focused = false;
+        }
+    }
+
+    pub const fn explorer_toggle_focus(&mut self) {
+        if self.explorer_open {
+            self.explorer_focused = !self.explorer_focused;
+        }
+    }
+
+    pub fn explorer_next(&mut self) {
+        if !self.tables.is_empty() {
+            self.explorer_idx = (self.explorer_idx + 1) % self.tables.len();
+        }
+    }
+
+    pub fn explorer_prev(&mut self) {
+        if !self.tables.is_empty() {
+            if self.explorer_idx == 0 {
+                self.explorer_idx = self.tables.len() - 1;
+            } else {
+                self.explorer_idx -= 1;
+            }
+        }
+    }
+
+    pub fn explorer_pick(&mut self) {
+        let Some(t) = self.tables.get(self.explorer_idx).cloned() else {
+            return;
+        };
+        let cols = self.fetch_columns(&t);
+        let preview_res = self
+            .backend
+            .as_ref()
+            .map(|b| self.rt.block_on(b.preview_table(&t, 5)));
+        let (rows, column_names, error) = match preview_res {
+            Some(Ok(qr)) => (qr.rows, qr.columns, None),
+            Some(Err(e)) => (Vec::new(), Vec::new(), Some(format!("{e}"))),
+            None => (Vec::new(), Vec::new(), Some("no active connection".into())),
+        };
+        self.preview = Some(PreviewState {
+            table: t.name.clone(),
+            columns: cols,
+            rows,
+            column_names,
+            error,
+        });
+        self.mode = Mode::Preview;
+    }
+
+    pub fn explorer_toggle_expand(&mut self) {
+        let Some(t) = self.tables.get(self.explorer_idx).cloned() else {
+            return;
+        };
+        if self.explorer_expanded.contains(&t.name) {
+            self.explorer_expanded.remove(&t.name);
+        } else {
+            let _ = self.fetch_columns(&t);
+            self.explorer_expanded.insert(t.name);
+        }
+    }
+
+    pub fn explorer_run_quick(&mut self) {
+        let Some(t) = self.tables.get(self.explorer_idx).cloned() else {
+            return;
+        };
+        let snippet = format!("SELECT * FROM {} LIMIT 100", t.name);
+        if !self.active_query.is_empty() {
+            self.active_query.push('\n');
+        }
+        self.active_query.push_str(&snippet);
+        self.explorer_focused = false;
+        self.run_active_cell();
+    }
+
+    pub fn preview_commit(&mut self) {
+        let Some(p) = self.preview.as_ref() else {
+            return;
+        };
+        let snippet = format!("SELECT * FROM {} LIMIT 100", p.table);
+        if !self.active_query.is_empty() {
+            self.active_query.push('\n');
+        }
+        self.active_query.push_str(&snippet);
+        self.preview = None;
+        self.mode = Mode::Normal;
+        self.explorer_focused = false;
+    }
+
+    pub fn complete_open(&mut self) {
+        let buf = &self.active_query;
+        let prefix_start = buf
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map_or(0, |i| i + 1);
+        let prefix = &buf[prefix_start..];
+        let prefix_lower = prefix.to_lowercase();
+        let preceding = buf[..prefix_start]
+            .trim_end()
+            .rsplit(|c: char| c.is_whitespace())
+            .next()
+            .unwrap_or("")
+            .to_uppercase();
+        let tables_only = matches!(
+            preceding.as_str(),
+            "FROM" | "JOIN" | "UPDATE" | "INTO" | "TABLE"
+        );
+        let mut items: Vec<String> = Vec::new();
+        for t in &self.tables {
+            if t.name.to_lowercase().starts_with(&prefix_lower) {
+                items.push(t.name.clone());
+            }
+        }
+        if !tables_only {
+            for cols in self.explorer_columns.values() {
+                for c in cols {
+                    if c.name.to_lowercase().starts_with(&prefix_lower) && !items.contains(&c.name)
+                    {
+                        items.push(c.name.clone());
+                    }
+                }
+            }
+        }
+        items.sort();
+        items.dedup();
+        if items.is_empty() {
+            self.status = Some("no completions".into());
+            return;
+        }
+        self.complete = Some(CompleteState {
+            items,
+            idx: 0,
+            prefix_len: prefix.chars().count(),
+        });
+        self.mode = Mode::Complete;
+    }
+
+    pub fn complete_next(&mut self) {
+        if let Some(c) = self.complete.as_mut()
+            && !c.items.is_empty()
+        {
+            c.idx = (c.idx + 1) % c.items.len();
+        }
+    }
+
+    pub fn complete_prev(&mut self) {
+        if let Some(c) = self.complete.as_mut()
+            && !c.items.is_empty()
+        {
+            if c.idx == 0 {
+                c.idx = c.items.len() - 1;
+            } else {
+                c.idx -= 1;
+            }
+        }
+    }
+
+    pub fn complete_commit(&mut self) {
+        let Some(c) = self.complete.as_ref() else {
+            return;
+        };
+        let Some(pick) = c.items.get(c.idx).cloned() else {
+            return;
+        };
+        for _ in 0..c.prefix_len {
+            self.active_query.pop();
+        }
+        self.active_query.push_str(&pick);
+        self.complete = None;
+        self.mode = Mode::Normal;
+    }
+
+    pub fn complete_close(&mut self) {
+        self.complete = None;
+        self.mode = Mode::Normal;
+    }
+
+    pub fn preview_close(&mut self) {
+        self.preview = None;
+        self.mode = Mode::Normal;
+    }
+
+    fn fetch_columns(&mut self, table: &TableName) -> Vec<ColumnInfo> {
+        if let Some(cached) = self.explorer_columns.get(&table.name) {
+            return cached.clone();
+        }
+        let Some(b) = &self.backend else {
+            return Vec::new();
+        };
+        match self.rt.block_on(b.list_columns(table)) {
+            Ok(cols) => {
+                self.explorer_columns
+                    .insert(table.name.clone(), cols.clone());
+                cols
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
     pub fn open_file(&mut self, path: &std::path::Path) -> Result<()> {
         let abs =
             std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
@@ -324,6 +566,14 @@ impl App {
             && let Ok(tables) = self.rt.block_on(b.list_tables(None))
         {
             self.tables = tables;
+            self.preload_columns();
+        }
+    }
+
+    fn preload_columns(&mut self) {
+        let tables = self.tables.clone();
+        for t in tables {
+            let _ = self.fetch_columns(&t);
         }
     }
 
@@ -373,6 +623,8 @@ impl App {
         self.backend = None;
         self.loaded_id = None;
         self.tables.clear();
+        self.explorer_expanded.clear();
+        self.explorer_columns.clear();
     }
 
     pub fn current(&self) -> Option<&Connection> {

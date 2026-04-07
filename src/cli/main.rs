@@ -6,7 +6,7 @@ use std::io;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -47,7 +47,7 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 if app.splash_active() {
                     app.dismiss_splash();
                 } else {
-                    handle_key(app, key.code)?;
+                    handle_key(app, key.code, key.modifiers)?;
                 }
             }
         } else {
@@ -57,15 +57,65 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
     Ok(())
 }
 
-fn handle_key(app: &mut App, code: KeyCode) -> Result<()> {
+fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> Result<()> {
+    if mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('b') {
+        app.toggle_explorer();
+        return Ok(());
+    }
+    if mods.contains(KeyModifiers::CONTROL)
+        && code == KeyCode::Char(' ')
+        && app.mode == Mode::Normal
+        && !(app.explorer_open && app.explorer_focused)
+    {
+        app.complete_open();
+        return Ok(());
+    }
     match app.mode {
+        Mode::Complete => handle_complete(app, code),
+        Mode::Preview => handle_preview(app, code),
+        Mode::Normal if app.explorer_open && app.explorer_focused => handle_explorer(app, code),
         Mode::Normal => handle_notebook(app, code)?,
         Mode::Goto => handle_goto(app, code),
     }
     Ok(())
 }
 
+fn handle_explorer(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Char('j') | KeyCode::Down => app.explorer_next(),
+        KeyCode::Char('k') | KeyCode::Up => app.explorer_prev(),
+        KeyCode::Char(' ') | KeyCode::Right | KeyCode::Left => app.explorer_toggle_expand(),
+        KeyCode::Enter => app.explorer_pick(),
+        KeyCode::Char('r') => app.explorer_run_quick(),
+        KeyCode::Tab | KeyCode::Esc => app.explorer_toggle_focus(),
+        KeyCode::Char('q') => app.should_quit = true,
+        _ => {}
+    }
+}
+
+fn handle_complete(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => app.complete_next(),
+        KeyCode::Char('k') | KeyCode::Up => app.complete_prev(),
+        KeyCode::Enter => app.complete_commit(),
+        KeyCode::Esc => app.complete_close(),
+        _ => {}
+    }
+}
+
+fn handle_preview(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Enter => app.preview_commit(),
+        KeyCode::Esc | KeyCode::Char('q') => app.preview_close(),
+        _ => {}
+    }
+}
+
 fn handle_notebook(app: &mut App, code: KeyCode) -> Result<()> {
+    if code == KeyCode::Tab && app.explorer_open {
+        app.explorer_toggle_focus();
+        return Ok(());
+    }
     match code {
         KeyCode::F(5) => app.run_active_cell(),
         KeyCode::Up => app.scroll_up(1),

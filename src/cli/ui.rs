@@ -39,11 +39,26 @@ pub fn draw(f: &mut Frame, app: &App) {
         .split(area);
 
     draw_header(f, chunks[0], app);
-    draw_notebook(f, chunks[1], app);
+    if app.explorer_open {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(24), Constraint::Min(0)])
+            .split(chunks[1]);
+        draw_explorer(f, body[0], app);
+        draw_notebook(f, body[1], app);
+    } else {
+        draw_notebook(f, chunks[1], app);
+    }
     draw_footer(f, chunks[2], app);
 
     if app.mode == Mode::Goto {
         draw_goto(f, area, app);
+    }
+    if app.mode == Mode::Preview {
+        draw_preview(f, area, app);
+    }
+    if app.mode == Mode::Complete {
+        draw_complete(f, area, app);
     }
 }
 
@@ -189,21 +204,113 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let dot = " \u{00b7} ";
-    let base = match app.mode {
-        Mode::Goto => format!(" j/k move{dot}Tab section{dot}Enter pick{dot}Esc cancel"),
-        Mode::Normal if app.active_query.is_empty() => format!(
-            " type to start a query{dot}g goto{dot}n new cell{dot}a add conn{dot}\u{2191}\u{2193} scroll{dot}q quit"
+    let (focus, hints) = match app.mode {
+        Mode::Complete => (
+            "COMPLETE",
+            format!("j/k move{dot}Enter pick{dot}Esc cancel"),
         ),
-        Mode::Normal => {
-            format!(" F5 run{dot}\u{21b5} newline{dot}\u{232b} delete{dot}type to extend")
-        }
+        Mode::Preview => ("PREVIEW", format!("Enter insert query{dot}Esc close")),
+        Mode::Goto => (
+            "GOTO",
+            format!("j/k move{dot}Tab section{dot}Enter pick{dot}Esc cancel"),
+        ),
+        Mode::Normal if app.explorer_open && app.explorer_focused => (
+            "EXPLORER",
+            format!(
+                "j/k move{dot}Space columns{dot}Enter preview{dot}r run{dot}Tab notebook{dot}Ctrl+B close"
+            ),
+        ),
+        Mode::Normal if app.active_query.is_empty() => (
+            "NOTEBOOK",
+            format!(
+                "type to start a query{dot}g goto{dot}Ctrl+B explorer{dot}n new cell{dot}a add conn{dot}q quit"
+            ),
+        ),
+        Mode::Normal => (
+            "EDITING",
+            format!(
+                "F5 run{dot}\u{21b5} newline{dot}\u{232b} delete{dot}Ctrl+Space complete{dot}Ctrl+B explorer"
+            ),
+        ),
     };
-    let line = app
-        .status
-        .as_ref()
-        .map_or_else(|| base.clone(), |s| format!("{base}    [{s}]"));
-    let p = Paragraph::new(line).style(Style::default().fg(CTP_SUBTEXT0).bg(CTP_BASE));
+    let mut spans = vec![
+        Span::raw(" "),
+        Span::styled(
+            format!("[{focus}]"),
+            Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(hints, Style::default().fg(CTP_SUBTEXT0)),
+    ];
+    if let Some(s) = app.status.as_ref() {
+        spans.push(Span::styled(
+            format!("    [{s}]"),
+            Style::default().fg(CTP_SUBTEXT0),
+        ));
+    }
+    let p = Paragraph::new(Line::from(spans)).style(Style::default().bg(CTP_BASE));
     f.render_widget(p, area);
+}
+
+fn draw_explorer(f: &mut Frame, area: Rect, app: &App) {
+    let border_color = if app.explorer_focused {
+        CTP_PEACH
+    } else {
+        CTP_SURFACE1
+    };
+    let block = Block::default()
+        .borders(Borders::RIGHT)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(CTP_BASE));
+    let inner = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width.saturating_sub(1),
+        height: area.height,
+    };
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " explorer ",
+        Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+    if app.tables.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " (no tables)",
+            Style::default().fg(CTP_SUBTEXT0),
+        )));
+    } else {
+        for (i, t) in app.tables.iter().enumerate() {
+            let active = app.explorer_focused && i == app.explorer_idx;
+            let expanded = app.explorer_expanded.contains(&t.name);
+            let arrow = if expanded { "\u{25be}" } else { "\u{25b8}" };
+            let style = if active {
+                Style::default()
+                    .fg(CTP_TEXT)
+                    .bg(CTP_SURFACE1)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(CTP_TEXT)
+            };
+            lines.push(Line::from(Span::styled(
+                format!(" {arrow} {} ", t.name),
+                style,
+            )));
+            if expanded && let Some(cols) = app.explorer_columns.get(&t.name) {
+                for c in cols {
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(c.name.clone(), Style::default().fg(CTP_TEXT)),
+                        Span::styled(format!(" : {}", c.ty), Style::default().fg(CTP_SUBTEXT0)),
+                    ]));
+                }
+            }
+        }
+    }
+    let p = Paragraph::new(lines).style(Style::default().bg(CTP_BASE));
+    f.render_widget(p, inner);
 }
 
 fn draw_notebook(f: &mut Frame, area: Rect, app: &App) {
@@ -470,6 +577,167 @@ fn draw_goto(f: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(CTP_TEXT)),
     );
     f.render_widget(table_p, halves[1]);
+}
+
+fn draw_complete(f: &mut Frame, area: Rect, app: &App) {
+    let Some(c) = app.complete.as_ref() else {
+        return;
+    };
+    let max_w = c
+        .items
+        .iter()
+        .map(|s| s.chars().count())
+        .max()
+        .unwrap_or(8)
+        .max(10);
+    let width = (max_w as u16 + 4).min(area.width.saturating_sub(4));
+    let height = (c.items.len() as u16 + 2).min(10);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" complete ")
+        .style(Style::default().bg(CTP_BASE).fg(CTP_TEXT))
+        .border_style(Style::default().fg(CTP_PEACH));
+    f.render_widget(block, popup);
+    let inner = Rect {
+        x: popup.x + 1,
+        y: popup.y + 1,
+        width: popup.width.saturating_sub(2),
+        height: popup.height.saturating_sub(2),
+    };
+    let visible = inner.height as usize;
+    let start = c.idx.saturating_sub(visible.saturating_sub(1));
+    let lines: Vec<Line> = c
+        .items
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible)
+        .map(|(i, s)| {
+            let style = if i == c.idx {
+                Style::default()
+                    .fg(CTP_TEXT)
+                    .bg(CTP_SURFACE1)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(CTP_TEXT)
+            };
+            Line::from(Span::styled(format!(" {s} "), style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_preview(f: &mut Frame, area: Rect, app: &App) {
+    let Some(p) = app.preview.as_ref() else {
+        return;
+    };
+    let popup = centered_rect(70, 70, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" preview \u{00b7} {} ", p.table))
+        .style(Style::default().bg(CTP_BASE).fg(CTP_TEXT))
+        .border_style(Style::default().fg(CTP_PEACH));
+    f.render_widget(block, popup);
+
+    let inner = Rect {
+        x: popup.x + 1,
+        y: popup.y + 1,
+        width: popup.width.saturating_sub(2),
+        height: popup.height.saturating_sub(2),
+    };
+    let halves = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(inner);
+
+    let mut col_lines: Vec<Line<'static>> = Vec::new();
+    col_lines.push(Line::from(Span::styled(
+        " columns ",
+        Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
+    )));
+    col_lines.push(Line::from(""));
+    if p.columns.is_empty() {
+        col_lines.push(Line::from(Span::styled(
+            " (no columns)",
+            Style::default().fg(CTP_SUBTEXT0),
+        )));
+    } else {
+        for c in &p.columns {
+            col_lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(c.name.clone(), Style::default().fg(CTP_TEXT)),
+                Span::styled(format!(" : {}", c.ty), Style::default().fg(CTP_SUBTEXT0)),
+            ]));
+        }
+    }
+    f.render_widget(Paragraph::new(col_lines), halves[0]);
+
+    let mut data_lines: Vec<Line<'static>> = Vec::new();
+    data_lines.push(Line::from(Span::styled(
+        " sample (5 rows) ",
+        Style::default().fg(CTP_MAUVE).add_modifier(Modifier::BOLD),
+    )));
+    data_lines.push(Line::from(""));
+    if let Some(err) = &p.error {
+        data_lines.push(Line::from(Span::styled(
+            format!(" {err}"),
+            Style::default().fg(CTP_RED),
+        )));
+    } else if p.column_names.is_empty() {
+        data_lines.push(Line::from(Span::styled(
+            " (no rows)",
+            Style::default().fg(CTP_SUBTEXT0),
+        )));
+    } else {
+        let widths = preview_widths(&p.column_names, &p.rows);
+        let header: String = p
+            .column_names
+            .iter()
+            .zip(widths.iter())
+            .map(|(c, w)| pad_cell(c, *w))
+            .collect::<Vec<_>>()
+            .join("  ");
+        data_lines.push(Line::from(Span::styled(
+            format!(" {header}"),
+            Style::default().fg(CTP_TEXT).add_modifier(Modifier::BOLD),
+        )));
+        for row in &p.rows {
+            let row_str: String = row
+                .iter()
+                .zip(widths.iter())
+                .map(|(v, w)| pad_cell(&json_to_string(v), *w))
+                .collect::<Vec<_>>()
+                .join("  ");
+            data_lines.push(Line::from(Span::styled(
+                format!(" {row_str}"),
+                Style::default().fg(CTP_TEXT),
+            )));
+        }
+    }
+    f.render_widget(Paragraph::new(data_lines), halves[1]);
+}
+
+fn preview_widths(columns: &[String], rows: &[Vec<serde_json::Value>]) -> Vec<usize> {
+    let mut widths: Vec<usize> = columns.iter().map(|c| c.chars().count().min(20)).collect();
+    for row in rows {
+        for (i, v) in row.iter().enumerate() {
+            if let Some(w) = widths.get_mut(i) {
+                let s = json_to_string(v);
+                *w = (*w).max(s.chars().count().min(20));
+            }
+        }
+    }
+    widths
 }
 
 const fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
