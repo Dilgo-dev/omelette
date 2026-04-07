@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
-use crate::app::{App, Cell, CellStatus, GotoFocus, Mode, SPLASH_TOTAL};
+use crate::app::{App, Cell, CellStatus, GotoFocus, Mode};
 
 // Catppuccin Mocha palette
 const CTP_BASE: Color = Color::Rgb(30, 30, 46);
@@ -65,9 +65,12 @@ fn glitch_for(row: usize, col: usize, frame: u32) -> char {
 }
 
 fn draw_splash(f: &mut Frame, area: Rect, app: &App) {
-    let elapsed = SPLASH_TOTAL.saturating_sub(app.splash_frames);
-    let show_tagline = elapsed >= 30;
-    let show_hint = elapsed >= 42;
+    let elapsed = app.splash_total.saturating_sub(app.splash_frames);
+    let scale = f32::from(u16::try_from(app.splash_total).unwrap_or(70)) / 70.0;
+    let tagline_at = (30.0 * scale) as u32;
+    let hint_at = (42.0 * scale) as u32;
+    let show_tagline = elapsed >= tagline_at;
+    let show_hint = elapsed >= hint_at;
 
     let art_width = SPLASH_ART[0].chars().count() as u16;
     let art_height = SPLASH_ART.len() as u16;
@@ -82,7 +85,8 @@ fn draw_splash(f: &mut Frame, area: Rect, app: &App) {
     for (row, raw) in SPLASH_ART.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
         for (col, ch) in raw.chars().enumerate() {
-            let settle_at = (row as u32) + (col as u32) / 4;
+            let raw = row as f32 + col as f32 / 4.0;
+            let settle_at = (raw * scale) as u32;
             let style = Style::default().fg(CTP_PEACH).add_modifier(Modifier::BOLD);
             if ch == ' ' {
                 spans.push(Span::raw(" "));

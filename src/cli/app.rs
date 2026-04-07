@@ -4,10 +4,15 @@ use anyhow::Result;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::connections::{Connection, ConnectionStore};
+use directories::ProjectDirs;
 use omelette::core::backend::{Backend, TableName};
 use omelette::core::engine::Engine;
 use omelette::core::result::QueryResult;
 use omelette::core::sqlite::SqliteBackend;
+
+fn marker_path() -> Option<std::path::PathBuf> {
+    ProjectDirs::from("", "", "omelette").map(|d| d.config_dir().join(".bootstrapped"))
+}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -38,7 +43,8 @@ pub enum GotoFocus {
     Tables,
 }
 
-pub const SPLASH_TOTAL: u32 = 70;
+pub const SPLASH_SLOW: u32 = 70;
+pub const SPLASH_FAST: u32 = 25;
 
 pub struct App {
     pub should_quit: bool,
@@ -47,6 +53,7 @@ pub struct App {
     pub mode: Mode,
     pub status: Option<String>,
     pub splash_frames: u32,
+    pub splash_total: u32,
 
     pub tables: Vec<TableName>,
     pub loaded_id: Option<String>,
@@ -76,18 +83,28 @@ impl std::fmt::Debug for App {
 impl App {
     pub fn new() -> Result<Self> {
         let rt = Builder::new_current_thread().enable_all().build()?;
-        let splash_frames = if std::env::var("OMELETTE_NO_SPLASH").is_ok() {
+        let first_launch = !marker_path().is_some_and(|p| p.exists());
+        let splash_total = if std::env::var("OMELETTE_NO_SPLASH").is_ok() {
             0
+        } else if first_launch {
+            SPLASH_SLOW
         } else {
-            SPLASH_TOTAL
+            SPLASH_FAST
         };
+        if first_launch && let Some(p) = marker_path() {
+            if let Some(parent) = p.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&p, b"1");
+        }
         Ok(Self {
             should_quit: false,
             connections: ConnectionStore::load()?,
             selected: 0,
             mode: Mode::Normal,
             status: None,
-            splash_frames,
+            splash_frames: splash_total,
+            splash_total,
             tables: Vec::new(),
             loaded_id: None,
             cells: Vec::new(),
