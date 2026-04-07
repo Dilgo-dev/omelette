@@ -38,12 +38,15 @@ pub enum GotoFocus {
     Tables,
 }
 
+pub const SPLASH_TOTAL: u32 = 70;
+
 pub struct App {
     pub should_quit: bool,
     pub connections: ConnectionStore,
     pub selected: usize,
     pub mode: Mode,
     pub status: Option<String>,
+    pub splash_frames: u32,
 
     pub tables: Vec<TableName>,
     pub loaded_id: Option<String>,
@@ -73,12 +76,18 @@ impl std::fmt::Debug for App {
 impl App {
     pub fn new() -> Result<Self> {
         let rt = Builder::new_current_thread().enable_all().build()?;
+        let splash_frames = if std::env::var("OMELETTE_NO_SPLASH").is_ok() {
+            0
+        } else {
+            SPLASH_TOTAL
+        };
         Ok(Self {
             should_quit: false,
             connections: ConnectionStore::load()?,
             selected: 0,
             mode: Mode::Normal,
             status: None,
+            splash_frames,
             tables: Vec::new(),
             loaded_id: None,
             cells: Vec::new(),
@@ -90,6 +99,20 @@ impl App {
             backend: None,
             rt,
         })
+    }
+
+    pub const fn tick_splash(&mut self) {
+        if self.splash_frames > 0 {
+            self.splash_frames -= 1;
+        }
+    }
+
+    pub const fn dismiss_splash(&mut self) {
+        self.splash_frames = 0;
+    }
+
+    pub const fn splash_active(&self) -> bool {
+        self.splash_frames > 0
     }
 
     pub fn active_push(&mut self, c: char) {

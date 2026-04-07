@@ -3,6 +3,7 @@ mod connections;
 mod ui;
 
 use std::io;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -33,12 +34,21 @@ fn main() -> Result<()> {
 }
 
 fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
+    let tick = Duration::from_millis(40);
     while !app.should_quit {
         terminal.draw(|f| ui::draw(f, app))?;
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            handle_key(app, key.code)?;
+        if event::poll(tick)? {
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                if app.splash_active() {
+                    app.dismiss_splash();
+                } else {
+                    handle_key(app, key.code)?;
+                }
+            }
+        } else {
+            app.tick_splash();
         }
     }
     Ok(())

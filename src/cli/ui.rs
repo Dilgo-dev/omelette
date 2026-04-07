@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
-use crate::app::{App, Cell, CellStatus, GotoFocus, Mode};
+use crate::app::{App, Cell, CellStatus, GotoFocus, Mode, SPLASH_TOTAL};
 
 // Catppuccin Mocha palette
 const CTP_BASE: Color = Color::Rgb(30, 30, 46);
@@ -24,6 +24,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     let bg = Block::default().style(Style::default().bg(CTP_BASE));
     f.render_widget(bg, area);
 
+    if app.splash_active() {
+        draw_splash(f, area, app);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -40,6 +45,75 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.mode == Mode::Goto {
         draw_goto(f, area, app);
     }
+}
+
+const SPLASH_ART: [&str; 6] = [
+    "________                 .__          __    __          ",
+    "\\_____  \\   _____   ____ |  |   _____/  |__/  |_  ____  ",
+    " /   |   \\ /     \\_/ __ \\|  | _/ __ \\   __\\   __\\/ __ \\ ",
+    "/    |    \\  Y Y  \\  ___/|  |_\\  ___/|  |  |  | \\  ___/ ",
+    "\\_______  /__|_|  /\\___  >____/\\___  >__|  |__|  \\___  >",
+    "        \\/      \\/     \\/          \\/                \\/ ",
+];
+
+fn draw_splash(f: &mut Frame, area: Rect, app: &App) {
+    let elapsed = SPLASH_TOTAL.saturating_sub(app.splash_frames);
+    // 6 lines reveal one every 4 frames (0..24), tagline at frame 28, hold to end
+    let lines_visible = ((elapsed / 4) as usize).min(SPLASH_ART.len());
+    let show_tagline = elapsed >= 28;
+    let show_hint = elapsed >= 38;
+
+    let art_width = SPLASH_ART[0].chars().count() as u16;
+    let art_height = SPLASH_ART.len() as u16;
+    let block_height = art_height + 4; // art + blank + tagline + blank + hint
+
+    let x = area.x + (area.width.saturating_sub(art_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(block_height)) / 2;
+
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(block_height as usize);
+    for (i, raw) in SPLASH_ART.iter().enumerate() {
+        if i < lines_visible {
+            lines.push(Line::from(Span::styled(
+                (*raw).to_owned(),
+                Style::default().fg(CTP_PEACH).add_modifier(Modifier::BOLD),
+            )));
+        } else {
+            lines.push(Line::from(""));
+        }
+    }
+    lines.push(Line::from(""));
+    if show_tagline {
+        let pad = art_width.saturating_sub(25) / 2;
+        let padding: String = std::iter::repeat_n(' ', pad as usize).collect();
+        lines.push(Line::from(vec![
+            Span::raw(padding),
+            Span::styled(
+                "crack open your databases",
+                Style::default().fg(CTP_TEXT).add_modifier(Modifier::ITALIC),
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(""));
+    if show_hint {
+        let hint = "press any key to skip";
+        let pad = art_width.saturating_sub(hint.len() as u16) / 2;
+        let padding: String = std::iter::repeat_n(' ', pad as usize).collect();
+        lines.push(Line::from(vec![
+            Span::raw(padding),
+            Span::styled(hint, Style::default().fg(CTP_SUBTEXT0)),
+        ]));
+    }
+
+    let block_area = Rect {
+        x,
+        y,
+        width: art_width.min(area.width),
+        height: lines.len() as u16,
+    };
+    let p = Paragraph::new(lines).style(Style::default().bg(CTP_BASE));
+    f.render_widget(p, block_area);
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {

@@ -26,6 +26,7 @@ fi
 TEST_HOME="$(mktemp -d -t omelette-tui-test.XXXXXX)"
 mkdir -p "$TEST_HOME/.config/omelette"
 export HOME="$TEST_HOME"
+export OMELETTE_NO_SPLASH=1
 
 cleanup() {
   for s in $(tmux ls 2>/dev/null | awk -F: '/^'"$SESSION_PREFIX"'/ {print $1}'); do
