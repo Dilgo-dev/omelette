@@ -24,6 +24,9 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new()?;
+    if let Some(arg) = std::env::args().nth(1) {
+        app.open_file(std::path::Path::new(&arg))?;
+    }
     let res = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;

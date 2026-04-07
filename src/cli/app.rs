@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::connections::{Connection, ConnectionStore};
@@ -285,6 +285,22 @@ impl App {
 
     pub const fn close_goto(&mut self) {
         self.mode = Mode::Normal;
+    }
+
+    pub fn open_file(&mut self, path: &std::path::Path) -> Result<()> {
+        let abs =
+            std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
+        let label = abs.file_name().map_or_else(
+            || abs.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let dsn = format!("sqlite://{}", abs.display());
+        let conn = Connection::new(label, Engine::Sqlite, dsn);
+        self.connections.add(conn);
+        self.selected = self.connections.connections.len() - 1;
+        self.splash_frames = 0;
+        self.ensure_backend();
+        Ok(())
     }
 
     pub fn add_placeholder(&mut self) -> Result<()> {
