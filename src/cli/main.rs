@@ -1,4 +1,5 @@
 mod app;
+mod connections;
 mod ui;
 
 use std::io;
@@ -21,7 +22,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new()?;
     let res = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;
