@@ -188,11 +188,20 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
-    let base = " up/down: scroll \u{00b7} F5: run \u{00b7} n: new cell \u{00b7} g: goto \u{00b7} Esc: leave \u{00b7} q: quit";
+    let dot = " \u{00b7} ";
+    let base = match app.mode {
+        Mode::Goto => format!(" j/k move{dot}Tab section{dot}Enter pick{dot}Esc cancel"),
+        Mode::Normal if app.active_query.is_empty() => format!(
+            " type to start a query{dot}g goto{dot}n new cell{dot}a add conn{dot}\u{2191}\u{2193} scroll{dot}q quit"
+        ),
+        Mode::Normal => {
+            format!(" F5 run{dot}\u{21b5} newline{dot}\u{232b} delete{dot}type to extend")
+        }
+    };
     let line = app
         .status
         .as_ref()
-        .map_or_else(|| base.to_owned(), |s| format!("{base}    [{s}]"));
+        .map_or_else(|| base.clone(), |s| format!("{base}    [{s}]"));
     let p = Paragraph::new(line).style(Style::default().fg(CTP_SUBTEXT0).bg(CTP_BASE));
     f.render_widget(p, area);
 }

@@ -25,7 +25,7 @@ test_smoke_boot() {
   assert_contains "$s" "omel" || return 1
   assert_contains "$s" "ette" || return 1
   assert_contains "$s" "crack open your databases" || return 1
-  assert_contains "$s" "q: quit" || return 1
+  assert_contains "$s" "q quit" || return 1
   om_stop "$s"
 }
 run_test "smoke / boots and shows title" test_smoke_boot
