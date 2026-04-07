@@ -4,13 +4,17 @@ use tokio::runtime::{Builder, Runtime};
 use crate::connections::{Connection, ConnectionStore};
 use omelette::core::backend::{Backend, TableName};
 use omelette::core::engine::Engine;
+use omelette::core::result::QueryResult;
 use omelette::core::sqlite::SqliteBackend;
+
+const PREVIEW_LIMIT: u32 = 50;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum Focus {
     #[default]
     Connections,
     Schema,
+    Preview,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -33,6 +37,10 @@ pub struct App {
     pub tables: Vec<TableName>,
     pub selected_table: usize,
     pub loaded_id: Option<String>,
+    pub preview: Option<QueryResult>,
+    pub preview_row_offset: usize,
+    pub preview_col_offset: usize,
+    pub previewed_table: Option<String>,
     backend: Option<Box<dyn Backend>>,
     rt: Runtime,
 }
@@ -64,6 +72,10 @@ impl App {
             tables: Vec::new(),
             selected_table: 0,
             loaded_id: None,
+            preview: None,
+            preview_row_offset: 0,
+            preview_col_offset: 0,
+            previewed_table: None,
             backend: None,
             rt,
         })
@@ -72,7 +84,8 @@ impl App {
     pub fn cycle_focus(&mut self) {
         self.focus = match self.focus {
             Focus::Connections => Focus::Schema,
-            Focus::Schema => Focus::Connections,
+            Focus::Schema => Focus::Preview,
+            Focus::Preview => Focus::Connections,
         };
         if self.focus == Focus::Schema {
             self.ensure_backend();
@@ -107,6 +120,7 @@ impl App {
             return;
         }
         self.selected_table = (self.selected_table + 1) % self.tables.len();
+        self.load_preview();
     }
 
     pub fn select_prev_table(&mut self) {
@@ -119,6 +133,31 @@ impl App {
         } else {
             self.selected_table -= 1;
         }
+        self.load_preview();
+    }
+
+    pub fn scroll_preview_down(&mut self) {
+        if let Some(p) = &self.preview {
+            if self.preview_row_offset + 1 < p.rows.len() {
+                self.preview_row_offset += 1;
+            }
+        }
+    }
+
+    pub const fn scroll_preview_up(&mut self) {
+        self.preview_row_offset = self.preview_row_offset.saturating_sub(1);
+    }
+
+    pub fn scroll_preview_right(&mut self) {
+        if let Some(p) = &self.preview {
+            if self.preview_col_offset + 1 < p.columns.len() {
+                self.preview_col_offset += 1;
+            }
+        }
+    }
+
+    pub const fn scroll_preview_left(&mut self) {
+        self.preview_col_offset = self.preview_col_offset.saturating_sub(1);
     }
 
     pub fn add_placeholder(&mut self) -> Result<()> {
@@ -193,6 +232,36 @@ impl App {
                 Err(e) => self.status = Some(format!("list_tables: {e}")),
             }
         }
+        self.load_preview();
+    }
+
+    pub fn load_preview(&mut self) {
+        let Some(table) = self.tables.get(self.selected_table).cloned() else {
+            self.preview = None;
+            self.previewed_table = None;
+            return;
+        };
+        if self.previewed_table.as_deref() == Some(table.name.as_str()) {
+            return;
+        }
+        let Some(b) = &self.backend else {
+            return;
+        };
+        match self.rt.block_on(b.preview_table(&table, PREVIEW_LIMIT)) {
+            Ok(qr) => {
+                let rows = qr.rows.len();
+                self.preview = Some(qr);
+                self.previewed_table = Some(table.name.clone());
+                self.preview_row_offset = 0;
+                self.preview_col_offset = 0;
+                self.status = Some(format!("preview {}: {rows} row(s)", table.name));
+            }
+            Err(e) => {
+                self.preview = None;
+                self.previewed_table = None;
+                self.status = Some(format!("preview: {e}"));
+            }
+        }
     }
 
     fn ensure_backend(&mut self) {
@@ -242,6 +311,10 @@ impl App {
         self.loaded_id = None;
         self.tables.clear();
         self.selected_table = 0;
+        self.preview = None;
+        self.previewed_table = None;
+        self.preview_row_offset = 0;
+        self.preview_col_offset = 0;
     }
 
     pub fn current(&self) -> Option<&Connection> {

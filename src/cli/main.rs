@@ -93,6 +93,14 @@ fn handle_normal(app: &mut App, code: KeyCode) -> Result<()> {
             KeyCode::Char('R') => app.refresh_schema(),
             _ => {}
         },
+        Focus::Preview => match code {
+            KeyCode::Char('j') | KeyCode::Down => app.scroll_preview_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.scroll_preview_up(),
+            KeyCode::Char('h') | KeyCode::Left => app.scroll_preview_left(),
+            KeyCode::Char('l') | KeyCode::Right => app.scroll_preview_right(),
+            KeyCode::Char('R') => app.load_preview(),
+            _ => {}
+        },
     }
     Ok(())
 }

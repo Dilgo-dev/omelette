@@ -2,7 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+};
 
 use crate::app::{App, Focus, Mode};
 use omelette::core::engine::Engine;
@@ -100,6 +102,14 @@ fn focus_block(title: &str, focused: bool) -> Block<'_> {
 }
 
 fn draw_connections_panel(f: &mut Frame, area: Rect, app: &App) {
+    let block = focus_block(" connections ", app.focus == Focus::Connections);
+    if app.connections.connections.is_empty() {
+        let p = Paragraph::new("no connection yet\n\npress 'a' to add one")
+            .style(Style::default().bg(OMNI_BG).fg(DIM))
+            .block(block);
+        f.render_widget(p, area);
+        return;
+    }
     let items: Vec<ListItem> = app
         .connections
         .connections
@@ -126,10 +136,7 @@ fn draw_connections_panel(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let list = List::new(items)
-        .block(focus_block(
-            " connections ",
-            app.focus == Focus::Connections,
-        ))
+        .block(block)
         .highlight_style(
             Style::default()
                 .bg(OMNI_RED)
@@ -188,21 +195,68 @@ fn draw_schema_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_body_panel(f: &mut Frame, area: Rect, app: &App) {
-    let body = app.current().map_or_else(
-        || "no connection yet\n\npress 'a' to add one".into(),
-        |c| {
-            format!(
-                "{}\n\nengine: {}\ndsn:    {}\n\n(table preview lands in #8)",
-                c.label,
-                c.engine.label(),
-                if c.dsn.is_empty() { "<empty>" } else { &c.dsn },
-            )
-        },
-    );
-    let p = Paragraph::new(body)
-        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK))
-        .block(focus_block(" details ", false));
-    f.render_widget(p, area);
+    let block = focus_block(" preview ", app.focus == Focus::Preview);
+    let Some(qr) = &app.preview else {
+        let hint = if app.current().is_none() {
+            "no connection".to_owned()
+        } else if app.tables.is_empty() {
+            "no table to preview".to_owned()
+        } else {
+            "select a table in the schema panel".to_owned()
+        };
+        let p = Paragraph::new(hint)
+            .style(Style::default().bg(OMNI_BG).fg(DIM))
+            .block(block);
+        f.render_widget(p, area);
+        return;
+    };
+
+    if qr.columns.is_empty() {
+        let p = Paragraph::new("(no columns)")
+            .style(Style::default().bg(OMNI_BG).fg(DIM))
+            .block(block);
+        f.render_widget(p, area);
+        return;
+    }
+
+    let col_off = app
+        .preview_col_offset
+        .min(qr.columns.len().saturating_sub(1));
+    let row_off = app.preview_row_offset.min(qr.rows.len().saturating_sub(1));
+
+    let cols: Vec<&str> = qr.columns[col_off..].iter().map(String::as_str).collect();
+
+    let header = Row::new(cols.iter().map(|c| {
+        Cell::from(Span::styled(
+            (*c).to_owned(),
+            Style::default().fg(OMNI_RED).add_modifier(Modifier::BOLD),
+        ))
+    }));
+
+    let body_rows = qr.rows[row_off..].iter().map(|row| {
+        let cells: Vec<Cell> = row[col_off..]
+            .iter()
+            .map(|v| Cell::from(json_to_string(v)))
+            .collect();
+        Row::new(cells)
+    });
+
+    let widths: Vec<Constraint> = (0..cols.len()).map(|_| Constraint::Length(16)).collect();
+
+    let table = Table::new(body_rows, widths)
+        .header(header)
+        .block(block)
+        .style(Style::default().bg(OMNI_BG).fg(OMNI_INK));
+
+    f.render_widget(table, area);
+}
+
+fn json_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "NULL".to_owned(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
 }
 
 fn draw_help(f: &mut Frame, area: Rect, app: &App) {
@@ -210,6 +264,7 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Mode::Normal => match app.focus {
             Focus::Connections => "Tab: focus  j/k: move  a: add  r: rename  d: delete  q: quit",
             Focus::Schema => "Tab: focus  j/k: move  R: refresh  q: quit",
+            Focus::Preview => "Tab: focus  hjkl: scroll  R: reload  q: quit",
         },
         Mode::ConfirmDelete => "y: confirm delete  n/Esc: cancel",
         Mode::Rename => "type new label  Enter: save  Esc: cancel",

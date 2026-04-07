@@ -80,9 +80,33 @@ test_schema_panel() {
   assert_contains "$s" "loaded 0 table" || return 1
 
   om_send "$s" Tab
+  om_send "$s" Tab
   assert_contains "$s" "a: add" || return 1
   om_stop "$s"
 }
 run_test "schema / panel toggles focus and refreshes" test_schema_panel
+
+# ────────────────────────────────────────────────────────────────────
+# 03 / preview: seeded SQLite renders rows in the preview panel
+# ────────────────────────────────────────────────────────────────────
+test_preview_seeded() {
+  local s
+  s=$(om_start_seeded preview) || return 1
+  assert_contains "$s" "seeded preview" || return 1
+
+  om_send "$s" Tab
+  assert_contains "$s" "pets" || return 1
+
+  om_send "$s" Tab
+  assert_contains "$s" "preview" || return 1
+  assert_contains "$s" "name" || return 1
+  assert_contains "$s" "age" || return 1
+  assert_contains "$s" "milo" || return 1
+  assert_contains "$s" "luna" || return 1
+  assert_contains "$s" "pepper" || return 1
+  assert_contains "$s" "hjkl: scroll" || return 1
+  om_stop "$s"
+}
+run_test "preview / seeded sqlite shows rows" test_preview_seeded
 
 summary

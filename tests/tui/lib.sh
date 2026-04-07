@@ -44,6 +44,31 @@ om_start() {
   printf '%s' "$session"
 }
 
+# Pre-seed a SQLite file with a `pets` table and write a connections.json
+# pointing to it before launching omelette. Echos the session name.
+om_start_seeded() {
+  local name="${1:-seeded}"
+  local db="$TEST_HOME/seed_${name}.db"
+  rm -f "$db"
+  sqlite3 "$db" <<SQL
+CREATE TABLE pets (id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
+INSERT INTO pets (name, age) VALUES ('milo', 4), ('luna', 2), ('pepper', 7);
+SQL
+  cat > "$TEST_HOME/.config/omelette/connections.json" <<JSON
+{
+  "connections": [
+    {
+      "id": "seed-${name}",
+      "label": "seeded ${name}",
+      "engine": "Sqlite",
+      "dsn": "sqlite://${db}"
+    }
+  ]
+}
+JSON
+  om_start "$name"
+}
+
 om_send() {
   local session=$1
   shift

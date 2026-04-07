@@ -20,7 +20,7 @@ lint:
 check: fmt lint build
 
 tui-test: build
-	nix-shell -p tmux --run ./tests/tui/run.sh
+	nix-shell -p tmux sqlite --run ./tests/tui/run.sh
 
 tui-record: build
 	mkdir -p tests/tui/tapes/output
